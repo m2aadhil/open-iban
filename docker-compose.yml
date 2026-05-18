@@ -1,0 +1,12 @@
+services:
+  open-iban:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      JWT_SECRET: ${JWT_SECRET:-change-me-in-production-please}
+      NODE_ENV: production
+      LOG_LEVEL: info
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped

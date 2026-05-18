@@ -1,0 +1,20 @@
+{
+  "name": "open-iban",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm -ws run build",
+    "dev": "npm-run-all -p dev:server dev:web",
+    "dev:server": "npm -w @open-iban/server run dev",
+    "dev:web": "npm -w @open-iban/web run dev",
+    "test": "npm -w @open-iban/server run test",
+    "seed:admin": "npm -w @open-iban/server run seed:admin"
+  },
+  "devDependencies": {
+    "npm-run-all": "^4.1.5",
+    "typescript": "^5.6.3"
+  }
+}
