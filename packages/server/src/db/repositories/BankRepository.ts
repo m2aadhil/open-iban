@@ -1,5 +1,7 @@
 import type Database from 'better-sqlite3';
+import { LRUCache } from 'lru-cache';
 import type { BankInfo } from '@open-iban/shared';
+import { bankCacheHits, bankCacheMisses } from '../../metrics.js';
 
 interface BankRow {
   country: string;
@@ -23,11 +25,14 @@ function rowToBank(r: BankRow): BankInfo {
   };
 }
 
+const NEGATIVE: BankInfo = Object.freeze({ country: '', bankCode: '' }) as BankInfo;
+
 export class BankRepository {
   private findStmt;
   private countByCountryStmt;
   private deleteBySourceStmt;
   private upsertStmt;
+  private cache = new LRUCache<string, BankInfo>({ max: 100_000 });
 
   constructor(private db: Database.Database) {
     this.findStmt = db.prepare<[string, string], BankRow>(
@@ -47,12 +52,29 @@ export class BankRepository {
   }
 
   find(country: string, bankCode: string): BankInfo | undefined {
-    const r = this.findStmt.get(country.toUpperCase(), bankCode);
-    return r ? rowToBank(r) : undefined;
+    const cc = country.toUpperCase();
+    const key = `${cc}:${bankCode}`;
+    const cached = this.cache.get(key);
+    if (cached !== undefined) {
+      bankCacheHits.inc();
+      return cached === NEGATIVE ? undefined : cached;
+    }
+    bankCacheMisses.inc();
+    const r = this.findStmt.get(cc, bankCode);
+    const result = r ? rowToBank(r) : undefined;
+    this.cache.set(key, result ?? NEGATIVE);
+    return result;
   }
 
   countByCountry(country: string): number {
     return this.countByCountryStmt.get(country.toUpperCase())?.c ?? 0;
+  }
+
+  invalidateCountry(country: string): void {
+    const prefix = `${country.toUpperCase()}:`;
+    for (const key of this.cache.keys()) {
+      if (key.startsWith(prefix)) this.cache.delete(key);
+    }
   }
 
   /** Replace all rows from a given source in a single transaction. */

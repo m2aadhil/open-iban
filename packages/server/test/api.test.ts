@@ -5,6 +5,8 @@ import { buildServer } from '../src/index.js';
 import { db, closeDb } from '../src/db/index.js';
 import { UserRepository } from '../src/db/repositories/UserRepository.js';
 import { AuthService } from '../src/services/AuthService.js';
+import { bankCacheHits, bankCacheMisses } from '../src/metrics.js';
+import { calculateIban } from '../src/iban/calculator.js';
 
 mkdirSync('./data', { recursive: true });
 
@@ -121,6 +123,8 @@ describe('admin upload + BIC lookup', () => {
   });
 
   it('writes audit entries for validation and upload', async () => {
+    // Flush queued setImmediate audit writes from prior tests
+    await new Promise((r) => setImmediate(r));
     const audit = await app.inject({
       method: 'GET',
       url: '/admin/audit?limit=100',
@@ -131,5 +135,65 @@ describe('admin upload + BIC lookup', () => {
     expect(actions.has('validate')).toBe(true);
     expect(actions.has('upload')).toBe(true);
     expect(actions.has('login')).toBe(true);
+  });
+});
+
+describe('bank lookup cache', () => {
+  async function metricValue(name: 'hits' | 'misses') {
+    const m = name === 'hits' ? bankCacheHits : bankCacheMisses;
+    const arr = await m.get();
+    return arr.values[0]?.value ?? 0;
+  }
+
+  it('serves repeated BIC lookups from cache', async () => {
+    // First lookup after upload may already be cached from earlier test runs;
+    // assert delta behavior across two consecutive calls.
+    await app.inject({ method: 'GET', url: '/validate/DE89370400440532013000?getBIC=true' });
+    const hitsBefore = await metricValue('hits');
+    const missesBefore = await metricValue('misses');
+    await app.inject({ method: 'GET', url: '/validate/DE89370400440532013000?getBIC=true' });
+    const hitsAfter = await metricValue('hits');
+    const missesAfter = await metricValue('misses');
+    expect(hitsAfter).toBeGreaterThan(hitsBefore);
+    expect(missesAfter).toBe(missesBefore);
+  });
+
+  it('caches negative lookups for unknown bank codes', async () => {
+    const { iban: unknownIban } = calculateIban('DE', '99999999', '0000000000');
+    // Warm the negative cache
+    await app.inject({ method: 'GET', url: `/validate/${unknownIban}?getBIC=true` });
+    const hitsBefore = await metricValue('hits');
+    const missesBefore = await metricValue('misses');
+    await app.inject({ method: 'GET', url: `/validate/${unknownIban}?getBIC=true` });
+    const hitsAfter = await metricValue('hits');
+    const missesAfter = await metricValue('misses');
+    expect(hitsAfter).toBeGreaterThan(hitsBefore);
+    expect(missesAfter).toBe(missesBefore);
+  });
+
+  it('invalidates cache on data re-upload', async () => {
+    function pad(s: string, n: number) { return s.length >= n ? s.slice(0, n) : s + ' '.repeat(n - s.length); }
+    const line = pad('37040044', 8) + '1' + pad('Commerzbank NEU', 58) + pad('50667', 5) + pad('Köln', 35) + pad('', 27) + pad('', 5) + pad('NEWBANKXXXX', 11) + pad('00', 2);
+    const buffer = iconv.encode(line, 'ISO-8859-1');
+    const boundary = '----testboundary2';
+    const body = Buffer.concat([
+      Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="bundesbank.txt"\r\nContent-Type: text/plain\r\n\r\n`),
+      buffer,
+      Buffer.from(`\r\n--${boundary}--\r\n`),
+    ]);
+    const upload = await app.inject({
+      method: 'POST',
+      url: '/admin/data/DE',
+      headers: { cookie, 'content-type': `multipart/form-data; boundary=${boundary}` },
+      payload: body,
+    });
+    expect(upload.statusCode).toBe(200);
+
+    const validate = await app.inject({
+      method: 'GET',
+      url: '/validate/DE89370400440532013000?getBIC=true',
+    });
+    const data = validate.json();
+    expect(data.bankData?.bic).toBe('NEWBANKXXXX');
   });
 });

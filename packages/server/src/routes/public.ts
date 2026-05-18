@@ -18,6 +18,13 @@ const ValidateQuery = z.object({
     .transform((v) => v === true || v === 'true'),
 });
 
+const COUNTRIES_RESPONSE = Object.entries(COUNTRY_LENGTH).map(([code, length]) => ({
+  code,
+  length,
+  bankCodeLength: BANK_CODE_LENGTH[code],
+  hasBankData: code in BANK_CODE_LENGTH,
+}));
+
 export async function registerPublicRoutes(
   app: FastifyInstance,
   deps: { validation: ValidationService; audit: AuditRepository },
@@ -32,13 +39,17 @@ export async function registerPublicRoutes(
       });
       const country = result.iban.slice(0, 2) || 'UNKNOWN';
       validations.inc({ country, valid: String(result.valid) });
-      deps.audit.write({
+      const ip = req.ip;
+      const userAgent = req.headers['user-agent'];
+      const target = hashIban(result.iban);
+      const metadata = { country, valid: result.valid, getBIC: query.getBIC ?? false };
+      deps.audit.writeLater({
         actor: 'public',
         action: 'validate',
-        target: hashIban(result.iban),
-        ip: req.ip,
-        userAgent: req.headers['user-agent'],
-        metadata: { country, valid: result.valid, getBIC: query.getBIC ?? false },
+        target,
+        ip,
+        userAgent,
+        metadata,
       });
       return reply.send(result);
     },
@@ -50,12 +61,15 @@ export async function registerPublicRoutes(
       try {
         const { countryCode, bankCode, accountNumber } = req.params;
         const result = calculateIban(countryCode, bankCode, accountNumber);
-        deps.audit.write({
+        const ip = req.ip;
+        const userAgent = req.headers['user-agent'];
+        const target = countryCode.toUpperCase();
+        deps.audit.writeLater({
           actor: 'public',
           action: 'calculate',
-          target: countryCode.toUpperCase(),
-          ip: req.ip,
-          userAgent: req.headers['user-agent'],
+          target,
+          ip,
+          userAgent,
         });
         return reply.send(result);
       } catch (err) {
@@ -65,12 +79,6 @@ export async function registerPublicRoutes(
   );
 
   app.get('/countries', async (_req, reply) => {
-    const list = Object.entries(COUNTRY_LENGTH).map(([code, length]) => ({
-      code,
-      length,
-      bankCodeLength: BANK_CODE_LENGTH[code],
-      hasBankData: code in BANK_CODE_LENGTH,
-    }));
-    return reply.send(list);
+    return reply.send(COUNTRIES_RESPONSE);
   });
 }
