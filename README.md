@@ -75,8 +75,8 @@ JWT_SECRET=$(openssl rand -hex 32) docker compose up --build
 
 | Country | Source | Format | URL |
 |---|---|---|---|
-| DE | Deutsche Bundesbank | fixed-width text (ISO-8859-1) | https://www.bundesbank.de/en/tasks/payment-systems/services/bank-sort-codes/download-bank-sort-codes |
-| AT | Oesterreichische Nationalbank | CSV | https://www.oenb.at/en/Statistics/Standardized-Tables/Bank-and-Financial-Institutions/list-of-monetary-financial-institutions.html |
+| DE | Deutsche Bundesbank | fixed-width text (ISO-8859-1) | https://www.bundesbank.de/en/tasks/payment-systems/services/bank-sort-codes/download-bank-sort-codes-626218 |
+| AT | Oesterreichische Nationalbank | CSV | https://www.oenb.at/en/Statistics/Data-Classification/Austrian-Bank-Directory.html |
 | BE | National Bank of Belgium | XLSX | https://www.nbb.be/en/payments-and-securities/payment-standards/bank-identification-codes |
 | NL | Betaalvereniging Nederland | XLSX | https://www.betaalvereniging.nl |
 | CH | Swiss National Bank | XLSX | https://www.six-group.com |
