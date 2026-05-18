@@ -1,5 +1,13 @@
 # --- build stage ---
 FROM node:20-alpine AS build
+
+LABEL org.opencontainers.image.title="open-iban" \
+      org.opencontainers.image.description="TypeScript IBAN validation & BIC lookup service with admin UI. Port of fourcube/goiban with enhanced features." \
+      org.opencontainers.image.authors="m2aadhil" \
+      org.opencontainers.image.url="https://github.com/m2aadhil/open-iban" \
+      org.opencontainers.image.documentation="https://github.com/m2aadhil/open-iban#readme" \
+      org.opencontainers.image.source="https://github.com/m2aadhil/open-iban" \
+      org.opencontainers.image.licenses="MIT"
 WORKDIR /app
 COPY package.json package-lock.json* tsconfig.base.json ./
 COPY packages/shared/package.json ./packages/shared/

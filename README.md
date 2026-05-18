@@ -1,5 +1,9 @@
 # open-iban
 
+[![Docker Hub](https://img.shields.io/docker/v/m2aadhil/open-iban?label=docker&logo=docker)](https://hub.docker.com/r/m2aadhil/open-iban)
+[![Docker Image Size](https://img.shields.io/docker/image-size/m2aadhil/open-iban/latest)](https://hub.docker.com/r/m2aadhil/open-iban)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 A TypeScript port of [fourcube/goiban](https://github.com/fourcube/goiban) —
 the validation/BIC-lookup service that powers `openiban.com`. Adds a web UI
 for admins to refresh per-country bank register data, full audit logging,
@@ -23,6 +27,28 @@ authentication, rate limiting, and a complete test suite.
 **Supported countries for format-only validation**: 80+ (full ISO 13616 set)
 
 ## Quick start
+
+### Docker (recommended)
+
+```bash
+docker run -d \
+  -p 3000:3000 \
+  -e JWT_SECRET=$(openssl rand -hex 32) \
+  -v ./data:/app/data \
+  --name open-iban \
+  m2aadhil/open-iban:latest
+
+# Create admin user
+docker exec -it open-iban node packages/server/dist/scripts/seedAdmin.js
+```
+
+Or with docker-compose:
+
+```bash
+JWT_SECRET=$(openssl rand -hex 32) docker compose up -d
+```
+
+### From source
 
 ```bash
 npm install
