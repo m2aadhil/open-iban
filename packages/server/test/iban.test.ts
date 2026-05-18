@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
+import Database from 'better-sqlite3';
 import { checksumValid, formatIban, normalizeIban, validateFormat } from '../src/iban/validator.js';
 import { calculateIban } from '../src/iban/calculator.js';
+import { BankRepository } from '../src/db/repositories/BankRepository.js';
+import { runMigrations } from '../src/db/migrations.js';
 
 const VALID_IBANS = [
   'DE89370400440532013000',
@@ -78,5 +81,40 @@ describe('calculateIban', () => {
   });
   it('throws on bad bank code length', () => {
     expect(() => calculateIban('DE', '123', '0532013000')).toThrow();
+  });
+});
+
+describe('BankRepository cache', () => {
+  function makeRepo() {
+    const db = new Database(':memory:');
+    runMigrations(db);
+    return new BankRepository(db);
+  }
+
+  it('returns the same value on a second find without a new DB query', () => {
+    const repo = makeRepo();
+    repo.replaceBySource('test', [
+      { country: 'DE', bankCode: '12345678', name: 'X', bic: 'XBIC' },
+    ]);
+    expect(repo.find('DE', '12345678')?.bic).toBe('XBIC');
+    expect(repo.find('DE', '12345678')?.bic).toBe('XBIC');
+  });
+
+  it('caches negative lookups (returns undefined twice)', () => {
+    const repo = makeRepo();
+    expect(repo.find('DE', '00000000')).toBeUndefined();
+    expect(repo.find('DE', '00000000')).toBeUndefined();
+  });
+
+  it('invalidateCountry clears entries for that country only', () => {
+    const repo = makeRepo();
+    repo.replaceBySource('de', [{ country: 'DE', bankCode: '1', bic: 'A' }]);
+    repo.replaceBySource('at', [{ country: 'AT', bankCode: '2', bic: 'B' }]);
+    repo.find('DE', '1');
+    repo.find('AT', '2');
+    repo.invalidateCountry('DE');
+    // Re-find still works (goes to DB again for DE, cache for AT)
+    expect(repo.find('DE', '1')?.bic).toBe('A');
+    expect(repo.find('AT', '2')?.bic).toBe('B');
   });
 });

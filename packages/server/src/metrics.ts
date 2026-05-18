@@ -31,3 +31,15 @@ export const uploads = new client.Counter({
   labelNames: ['country', 'status'] as const,
   registers: [registry],
 });
+
+export const bankCacheHits = new client.Counter({
+  name: 'openiban_bank_cache_hits_total',
+  help: 'Bank lookup cache hits (positive or negative)',
+  registers: [registry],
+});
+
+export const bankCacheMisses = new client.Counter({
+  name: 'openiban_bank_cache_misses_total',
+  help: 'Bank lookup cache misses (went to SQLite)',
+  registers: [registry],
+});

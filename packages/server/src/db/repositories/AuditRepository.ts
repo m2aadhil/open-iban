@@ -57,6 +57,21 @@ export class AuditRepository {
     });
   }
 
+  /**
+   * Defer the write to the next event loop tick so the request handler can
+   * reply before SQLite is touched. Caller must pass plain values (not the
+   * Fastify request) since the request is recycled after reply.
+   */
+  writeLater(p: AuditWriteParams): void {
+    setImmediate(() => {
+      try {
+        this.write(p);
+      } catch {
+        // swallow — losing a public-audit row is preferable to crashing later
+      }
+    });
+  }
+
   list(opts: { action?: string; limit?: number; offset?: number } = {}): { entries: AuditEntry[]; total: number } {
     const limit = Math.min(opts.limit ?? 50, 500);
     const offset = opts.offset ?? 0;

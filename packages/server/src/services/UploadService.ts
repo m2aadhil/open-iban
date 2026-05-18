@@ -41,6 +41,7 @@ export class UploadService {
         collected.push(row);
       }
       const rowCount = this.banks.replaceBySource(parser.source, collected);
+      this.banks.invalidateCountry(cc);
       const durationMs = Date.now() - start;
 
       this.uploadsRepo.record({
