@@ -5,6 +5,10 @@ import helmet from '@fastify/helmet';
 import jwt from '@fastify/jwt';
 import multipart from '@fastify/multipart';
 import rateLimit from '@fastify/rate-limit';
+import staticFiles from '@fastify/static';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { existsSync } from 'node:fs';
 import { config } from './config.js';
 import { logger } from './logger.js';
 import { db } from './db/index.js';
@@ -63,6 +67,14 @@ export async function buildServer() {
   await registerHealthRoutes(app as any);
   await registerPublicRoutes(app as any, { validation, audit });
   await registerAdminRoutes(app as any, { auth, upload, banks, uploadsRepo, audit });
+
+  // Serve the React SPA in production (built web/dist next to the server package).
+  const webDist = join(dirname(fileURLToPath(import.meta.url)), '../../../packages/web/dist');
+  if (existsSync(webDist)) {
+    await app.register(staticFiles, { root: webDist, prefix: '/' });
+    // SPA fallback: unknown routes → index.html
+    app.setNotFoundHandler((_req, reply) => reply.sendFile('index.html'));
+  }
 
   // Purge audit log entries beyond the configured retention window.
   // Runs once at startup then every 24h.
