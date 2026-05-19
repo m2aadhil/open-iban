@@ -11,6 +11,7 @@ const ConfigSchema = z.object({
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
   CORS_ORIGIN: z.string().default('*'),
   MAX_UPLOAD_SIZE_MB: z.coerce.number().default(50),
+  AUDIT_LOG_MAX_DAYS: z.coerce.number().min(1).default(7),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;

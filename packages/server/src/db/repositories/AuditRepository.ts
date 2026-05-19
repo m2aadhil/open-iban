@@ -25,6 +25,7 @@ export class AuditRepository {
   private insertStmt;
   private listStmt;
   private countStmt;
+  private deleteOlderStmt;
 
   constructor(db: Database.Database) {
     this.insertStmt = db.prepare(
@@ -42,6 +43,9 @@ export class AuditRepository {
     );
     this.countStmt = db.prepare<{ action: string | null }, { c: number }>(
       `SELECT COUNT(*) AS c FROM audit_log WHERE (@action IS NULL OR action = @action)`,
+    );
+    this.deleteOlderStmt = db.prepare<[number]>(
+      `DELETE FROM audit_log WHERE ts < ?`,
     );
   }
 
@@ -70,6 +74,11 @@ export class AuditRepository {
         // swallow — losing a public-audit row is preferable to crashing later
       }
     });
+  }
+
+  /** Delete entries older than cutoffMs (epoch ms). Returns rows deleted. */
+  deleteOlderThan(cutoffMs: number): number {
+    return (this.deleteOlderStmt.run(cutoffMs).changes);
   }
 
   list(opts: { action?: string; limit?: number; offset?: number } = {}): { entries: AuditEntry[]; total: number } {

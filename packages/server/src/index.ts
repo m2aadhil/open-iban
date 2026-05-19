@@ -64,6 +64,19 @@ export async function buildServer() {
   await registerPublicRoutes(app as any, { validation, audit });
   await registerAdminRoutes(app as any, { auth, upload, banks, uploadsRepo, audit });
 
+  // Purge audit log entries beyond the configured retention window.
+  // Runs once at startup then every 24h.
+  function purgeAuditLog() {
+    const cutoff = Date.now() - config.AUDIT_LOG_MAX_DAYS * 24 * 60 * 60 * 1000;
+    const deleted = audit.deleteOlderThan(cutoff);
+    if (deleted > 0) {
+      logger.info({ deleted, maxDays: config.AUDIT_LOG_MAX_DAYS }, 'audit log purged');
+    }
+  }
+  purgeAuditLog();
+  const purgeInterval = setInterval(purgeAuditLog, 24 * 60 * 60 * 1000);
+  app.addHook('onClose', () => clearInterval(purgeInterval));
+
   return app;
 }
 
