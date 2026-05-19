@@ -197,3 +197,20 @@ describe('bank lookup cache', () => {
     expect(data.bankData?.bic).toBe('NEWBANKXXXX');
   });
 });
+
+describe('audit log retention', () => {
+  it('deleteOlderThan removes entries before cutoff', async () => {
+    const { AuditRepository } = await import('../src/db/repositories/AuditRepository.js');
+    const auditRepo = new AuditRepository(db);
+
+    auditRepo.write({ actor: 'test', action: 'test.old', target: 'old-entry' });
+    const eightDaysAgo = Date.now() - 8 * 24 * 60 * 60 * 1000;
+    db.prepare('UPDATE audit_log SET ts = ? WHERE action = ?').run(eightDaysAgo, 'test.old');
+
+    expect(auditRepo.list({ action: 'test.old' }).total).toBe(1);
+
+    const deleted = auditRepo.deleteOlderThan(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    expect(deleted).toBeGreaterThanOrEqual(1);
+    expect(auditRepo.list({ action: 'test.old' }).total).toBe(0);
+  });
+});
