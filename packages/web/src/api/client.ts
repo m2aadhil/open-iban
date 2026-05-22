@@ -40,4 +40,16 @@ export const api = {
     if (!res.ok) throw new Error((await res.text()) || `HTTP ${res.status}`);
     return res.json();
   },
+  previewUpload: async (country: string, file: File, isCustom = false) => {
+    const fd = new FormData();
+    fd.append('file', file);
+    const url = isCustom
+      ? `/admin/data/preview/custom?country=${encodeURIComponent(country)}`
+      : `/admin/data/preview/${encodeURIComponent(country)}`;
+    const res = await fetch(url, { method: 'POST', body: fd, credentials: 'include' });
+    if (!res.ok) throw new Error((await res.text()) || `HTTP ${res.status}`);
+    return res.json();
+  },
+  ingestUpload: (uploadId: string, mapping?: Record<string, string | undefined>) =>
+    request<any>('/admin/data/ingest', { method: 'POST', body: JSON.stringify({ uploadId, mapping }) }),
 };

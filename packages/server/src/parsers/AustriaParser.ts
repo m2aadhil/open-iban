@@ -10,6 +10,14 @@ export const AustriaParser: BankDataParser = {
   country: 'AT',
   source: 'oenb',
   extensions: ['.csv'],
+  format: 'csv',
+  suggestedMapping: {
+    bankCode: 'Bankleitzahl',
+    name: 'Bankenname',
+    bic: 'SWIFT-Code',
+    zip: 'PLZ',
+    city: 'Ort',
+  },
 
   *parse(buffer: Buffer): Iterable<BankInfo> {
     const text = buffer.toString('utf8');

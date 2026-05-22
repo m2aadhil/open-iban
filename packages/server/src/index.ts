@@ -18,6 +18,7 @@ import { UserRepository } from './db/repositories/UserRepository.js';
 import { UploadRepository } from './db/repositories/UploadRepository.js';
 import { ValidationService } from './services/ValidationService.js';
 import { UploadService } from './services/UploadService.js';
+import { UploadSessionStore } from './services/UploadSessionStore.js';
 import { AuthService } from './services/AuthService.js';
 import { registerPublicRoutes } from './routes/public.js';
 import { registerAdminRoutes } from './routes/admin.js';
@@ -61,7 +62,8 @@ export async function buildServer() {
   const users = new UserRepository(db);
   const uploadsRepo = new UploadRepository(db);
   const validation = new ValidationService(banks);
-  const upload = new UploadService(banks, uploadsRepo);
+  const uploadSessions = new UploadSessionStore();
+  const upload = new UploadService(banks, uploadsRepo, uploadSessions);
   const auth = new AuthService(users);
 
   await registerHealthRoutes(app as any);
@@ -88,6 +90,7 @@ export async function buildServer() {
   purgeAuditLog();
   const purgeInterval = setInterval(purgeAuditLog, 24 * 60 * 60 * 1000);
   app.addHook('onClose', () => clearInterval(purgeInterval));
+  app.addHook('onClose', () => uploadSessions.close());
 
   return app;
 }
