@@ -67,3 +67,24 @@ export interface UploadResult {
   rowCount: number;
   durationMs: number;
 }
+
+export interface ColumnMapping {
+  bankCode: string;
+  name?: string;
+  bic?: string;
+  zip?: string;
+  city?: string;
+}
+
+export type UploadFormat = 'csv' | 'xlsx' | 'fixed-width';
+
+export interface UploadPreview {
+  uploadId: string;
+  country: string;
+  format: UploadFormat;
+  headers: string[];
+  sampleRows: Record<string, string>[];
+  suggestedMapping?: ColumnMapping;
+  source: string;
+  filename: string;
+}

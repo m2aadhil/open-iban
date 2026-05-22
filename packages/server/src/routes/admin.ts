@@ -14,6 +14,19 @@ const AuditQuery = z.object({
   limit: z.coerce.number().min(1).max(500).default(50),
   offset: z.coerce.number().min(0).default(0),
 });
+const CustomCountryQuery = z.object({ country: z.string().length(2) });
+const IngestBody = z.object({
+  uploadId: z.string().min(1),
+  mapping: z
+    .object({
+      bankCode: z.string().min(1),
+      name: z.string().optional(),
+      bic: z.string().optional(),
+      zip: z.string().optional(),
+      city: z.string().optional(),
+    })
+    .optional(),
+});
 
 declare module '@fastify/jwt' {
   interface FastifyJWT {
@@ -110,6 +123,83 @@ export async function registerAdminRoutes(
         }
       },
     );
+
+    scoped.post<{ Params: { country: string } }>(
+      '/admin/data/preview/:country',
+      async (req, reply) => {
+        const cc = req.params.country.toUpperCase();
+        if (!(cc in PARSERS)) return reply.status(400).send({ error: `Unsupported country: ${cc}` });
+        const file = await req.file();
+        if (!file) return reply.status(400).send({ error: 'No file uploaded' });
+        const buf = await file.toBuffer();
+        try {
+          const preview = await deps.upload.preview(cc, file.filename, buf);
+          deps.audit.write({
+            actor: req.user.sub,
+            action: 'upload.preview',
+            target: cc,
+            ip: req.ip,
+            userAgent: req.headers['user-agent'],
+            metadata: { filename: file.filename, format: preview.format, headers: preview.headers.length },
+          });
+          return reply.send(preview);
+        } catch (err) {
+          const error = err instanceof Error ? err.message : String(err);
+          return reply.status(400).send({ error });
+        }
+      },
+    );
+
+    scoped.post('/admin/data/preview/custom', async (req, reply) => {
+      const { country } = CustomCountryQuery.parse(req.query);
+      const cc = country.toUpperCase();
+      const file = await req.file();
+      if (!file) return reply.status(400).send({ error: 'No file uploaded' });
+      const buf = await file.toBuffer();
+      try {
+        const preview = await deps.upload.preview(cc, file.filename, buf);
+        deps.audit.write({
+          actor: req.user.sub,
+          action: 'upload.preview',
+          target: cc,
+          ip: req.ip,
+          userAgent: req.headers['user-agent'],
+          metadata: { filename: file.filename, format: preview.format, custom: true },
+        });
+        return reply.send(preview);
+      } catch (err) {
+        const error = err instanceof Error ? err.message : String(err);
+        return reply.status(400).send({ error });
+      }
+    });
+
+    scoped.post('/admin/data/ingest', async (req, reply) => {
+      const body = IngestBody.parse(req.body);
+      try {
+        const result = await deps.upload.ingestFromSession(body.uploadId, body.mapping, req.user.sub);
+        deps.audit.write({
+          actor: req.user.sub,
+          action: 'upload',
+          target: result.country,
+          ip: req.ip,
+          userAgent: req.headers['user-agent'],
+          metadata: { filename: result.filename, rowCount: result.rowCount, mapping: body.mapping },
+        });
+        return reply.send(result);
+      } catch (err) {
+        const error = err instanceof Error ? err.message : String(err);
+        if (error.includes('not found') || error.includes('expired')) {
+          return reply.status(404).send({ error });
+        }
+        deps.audit.write({
+          actor: req.user.sub,
+          action: 'upload.failed',
+          ip: req.ip,
+          metadata: { uploadId: body.uploadId, error },
+        });
+        return reply.status(400).send({ error });
+      }
+    });
 
     scoped.get('/admin/data/status', async (_req, reply) => {
       const supported = Object.keys(PARSERS);

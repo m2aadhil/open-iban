@@ -23,6 +23,14 @@ export function createXlsxParser(opts: {
     country: opts.country,
     source: opts.source,
     extensions: ['.xlsx', '.xls'],
+    format: 'xlsx',
+    suggestedMapping: {
+      bankCode: opts.columns.bankCode[0],
+      name: opts.columns.name?.[0],
+      bic: opts.columns.bic?.[0],
+      zip: opts.columns.zip?.[0],
+      city: opts.columns.city?.[0],
+    },
 
     async *parse(buffer: Buffer): AsyncIterable<BankInfo> {
       const wb = new ExcelJS.Workbook();

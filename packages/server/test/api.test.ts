@@ -198,6 +198,126 @@ describe('bank lookup cache', () => {
   });
 });
 
+describe('column mapping (two-step upload)', () => {
+  function multipart(filename: string, contentType: string, buf: Buffer, boundary: string) {
+    return Buffer.concat([
+      Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${filename}"\r\nContent-Type: ${contentType}\r\n\r\n`),
+      buf,
+      Buffer.from(`\r\n--${boundary}--\r\n`),
+    ]);
+  }
+
+  const atCsvDefault = Buffer.from(
+    'Bankleitzahl;Bankenname;SWIFT-Code;PLZ;Ort\n' +
+      '20000;Erste Bank;GIBAATWWXXX;1010;Wien\n',
+  );
+
+  it('preview + ingest with default suggested mapping (AT)', async () => {
+    const boundary = '----b1';
+    const previewRes = await app.inject({
+      method: 'POST',
+      url: '/admin/data/preview/AT',
+      headers: { cookie, 'content-type': `multipart/form-data; boundary=${boundary}` },
+      payload: multipart('at.csv', 'text/csv', atCsvDefault, boundary),
+    });
+    expect(previewRes.statusCode).toBe(200);
+    const preview = previewRes.json();
+    expect(preview.format).toBe('csv');
+    expect(preview.headers).toContain('Bankleitzahl');
+    expect(preview.suggestedMapping?.bankCode).toBe('Bankleitzahl');
+
+    const ingest = await app.inject({
+      method: 'POST',
+      url: '/admin/data/ingest',
+      headers: { cookie, 'content-type': 'application/json' },
+      payload: { uploadId: preview.uploadId, mapping: preview.suggestedMapping },
+    });
+    expect(ingest.statusCode).toBe(200);
+    expect(ingest.json().rowCount).toBe(1);
+
+    const { iban } = calculateIban('AT', '20000', '00234573201');
+    const validate = await app.inject({ method: 'GET', url: `/validate/${iban}?getBIC=true` });
+    const data = validate.json();
+    expect(data.bankData?.bic).toBe('GIBAATWWXXX');
+  });
+
+  it('preview + ingest with custom (non-default) mapping', async () => {
+    const renamed = Buffer.from(
+      'Code;Inst;Swift;Postcode;Town\n' +
+        '12000;Bank Austria;BKAUATWWXXX;1010;Wien\n',
+    );
+    const boundary = '----b2';
+    const previewRes = await app.inject({
+      method: 'POST',
+      url: '/admin/data/preview/AT',
+      headers: { cookie, 'content-type': `multipart/form-data; boundary=${boundary}` },
+      payload: multipart('at.csv', 'text/csv', renamed, boundary),
+    });
+    expect(previewRes.statusCode).toBe(200);
+    const preview = previewRes.json();
+    expect(preview.headers).toEqual(['Code', 'Inst', 'Swift', 'Postcode', 'Town']);
+
+    const ingest = await app.inject({
+      method: 'POST',
+      url: '/admin/data/ingest',
+      headers: { cookie, 'content-type': 'application/json' },
+      payload: {
+        uploadId: preview.uploadId,
+        mapping: { bankCode: 'Code', name: 'Inst', bic: 'Swift', zip: 'Postcode', city: 'Town' },
+      },
+    });
+    expect(ingest.statusCode).toBe(200);
+    expect(ingest.json().rowCount).toBe(1);
+
+    const { iban } = calculateIban('AT', '12000', '00234573201');
+    const validate = await app.inject({ method: 'GET', url: `/validate/${iban}?getBIC=true` });
+    expect(validate.json().bankData?.bic).toBe('BKAUATWWXXX');
+  });
+
+  it('custom upload for an unregistered country (FR)', async () => {
+    const fr = Buffer.from('code,name,bic\n30001,Banque de France,BDFEFRPPCCT\n');
+    const boundary = '----b3';
+    const previewRes = await app.inject({
+      method: 'POST',
+      url: '/admin/data/preview/custom?country=FR',
+      headers: { cookie, 'content-type': `multipart/form-data; boundary=${boundary}` },
+      payload: multipart('fr.csv', 'text/csv', fr, boundary),
+    });
+    expect(previewRes.statusCode).toBe(200);
+    const preview = previewRes.json();
+    expect(preview.source).toBe('custom-FR');
+    expect(preview.suggestedMapping).toBeUndefined();
+
+    const ingest = await app.inject({
+      method: 'POST',
+      url: '/admin/data/ingest',
+      headers: { cookie, 'content-type': 'application/json' },
+      payload: {
+        uploadId: preview.uploadId,
+        mapping: { bankCode: 'code', name: 'name', bic: 'bic' },
+      },
+    });
+    expect(ingest.statusCode).toBe(200);
+    expect(ingest.json().rowCount).toBe(1);
+
+    const status = await app.inject({ method: 'GET', url: '/admin/data/status', headers: { cookie } });
+    const list = status.json() as Array<{ country: string; rowCount: number }>;
+    // FR is not in supported PARSERS list, but row should be counted via direct DB count
+    // (we just verify ingest succeeded above)
+    expect(list.length).toBeGreaterThan(0);
+  });
+
+  it('expired/unknown uploadId returns 404', async () => {
+    const ingest = await app.inject({
+      method: 'POST',
+      url: '/admin/data/ingest',
+      headers: { cookie, 'content-type': 'application/json' },
+      payload: { uploadId: '00000000-0000-0000-0000-000000000000', mapping: { bankCode: 'x' } },
+    });
+    expect(ingest.statusCode).toBe(404);
+  });
+});
+
 describe('audit log retention', () => {
   it('deleteOlderThan removes entries before cutoff', async () => {
     const { AuditRepository } = await import('../src/db/repositories/AuditRepository.js');

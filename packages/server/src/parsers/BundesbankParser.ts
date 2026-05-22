@@ -21,6 +21,7 @@ export const BundesbankParser: BankDataParser = {
   country: 'DE',
   source: 'bundesbank',
   extensions: ['.txt'],
+  format: 'fixed-width',
 
   *parse(buffer: Buffer): Iterable<BankInfo> {
     const text = iconv.decode(buffer, 'ISO-8859-1');
