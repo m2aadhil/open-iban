@@ -88,3 +88,34 @@ export interface UploadPreview {
   source: string;
   filename: string;
 }
+
+export interface ImportSource {
+  id: number;
+  country: string;
+  source: string;
+  url: string;
+  format: UploadFormat;
+  mapping?: ColumnMapping;
+  bankCodeStart?: number;
+  bankCodeLength?: number;
+  schedule?: string;
+  enabled: boolean;
+  lastRunAt?: string;
+  lastStatus?: 'success' | 'failed';
+  lastError?: string;
+  lastRowCount?: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ImportSourceInput {
+  country: string;
+  source: string;
+  url: string;
+  format: UploadFormat;
+  mapping?: ColumnMapping;
+  bankCodeStart?: number;
+  bankCodeLength?: number;
+  schedule?: string;
+  enabled?: boolean;
+}

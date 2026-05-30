@@ -16,9 +16,11 @@ import { BankRepository } from './db/repositories/BankRepository.js';
 import { AuditRepository } from './db/repositories/AuditRepository.js';
 import { UserRepository } from './db/repositories/UserRepository.js';
 import { UploadRepository } from './db/repositories/UploadRepository.js';
+import { ImportSourceRepository } from './db/repositories/ImportSourceRepository.js';
 import { ValidationService } from './services/ValidationService.js';
 import { UploadService } from './services/UploadService.js';
 import { UploadSessionStore } from './services/UploadSessionStore.js';
+import { ImportScheduler } from './services/ImportScheduler.js';
 import { AuthService } from './services/AuthService.js';
 import { registerPublicRoutes } from './routes/public.js';
 import { registerAdminRoutes } from './routes/admin.js';
@@ -61,14 +63,17 @@ export async function buildServer() {
   const audit = new AuditRepository(db);
   const users = new UserRepository(db);
   const uploadsRepo = new UploadRepository(db);
+  const importSources = new ImportSourceRepository(db);
   const validation = new ValidationService(banks);
   const uploadSessions = new UploadSessionStore();
   const upload = new UploadService(banks, uploadsRepo, uploadSessions);
+  const scheduler = new ImportScheduler(importSources, upload, audit);
+  scheduler.start();
   const auth = new AuthService(users);
 
   await registerHealthRoutes(app as any);
   await registerPublicRoutes(app as any, { validation, audit });
-  await registerAdminRoutes(app as any, { auth, upload, banks, uploadsRepo, audit });
+  await registerAdminRoutes(app as any, { auth, upload, banks, uploadsRepo, audit, importSources, scheduler });
 
   // Serve the React SPA in production (built web/dist next to the server package).
   const webDist = join(dirname(fileURLToPath(import.meta.url)), '../../../packages/web/dist');
@@ -91,6 +96,7 @@ export async function buildServer() {
   const purgeInterval = setInterval(purgeAuditLog, 24 * 60 * 60 * 1000);
   app.addHook('onClose', () => clearInterval(purgeInterval));
   app.addHook('onClose', () => uploadSessions.close());
+  app.addHook('onClose', () => scheduler.stop());
 
   return app;
 }
