@@ -26,11 +26,41 @@ export const BANK_CODE_LENGTH: Record<string, number> = {
 
 // Position of the bank code within the BBAN (after the 4-char country+check prefix)
 // For all currently-supported countries, the bank code starts at position 4 (right after check digits).
+
+// Dynamic registry of (country → {start, length}) for arbitrary countries imported via
+// import_sources. Populated at startup from ImportSourceRepository and refreshed on
+// create/update. Keys override BANK_CODE_LENGTH defaults when both are present.
+export interface BankCodePosition {
+  start: number;
+  length: number;
+}
+
+const dynamicPositions = new Map<string, BankCodePosition>();
+
+export function setDynamicBankCodePosition(country: string, pos: BankCodePosition | undefined): void {
+  const cc = country.toUpperCase();
+  if (pos) dynamicPositions.set(cc, pos);
+  else dynamicPositions.delete(cc);
+}
+
+export function clearDynamicBankCodePositions(): void {
+  dynamicPositions.clear();
+}
+
+function resolvePosition(country: string): BankCodePosition | null {
+  const cc = country.toUpperCase();
+  const dyn = dynamicPositions.get(cc);
+  if (dyn) return dyn;
+  const len = BANK_CODE_LENGTH[cc];
+  if (len) return { start: 4, length: len };
+  return null;
+}
+
 export function extractBankCode(iban: string): string | null {
   const country = iban.slice(0, 2).toUpperCase();
-  const length = BANK_CODE_LENGTH[country];
-  if (!length) return null;
-  return iban.slice(4, 4 + length);
+  const pos = resolvePosition(country);
+  if (!pos) return null;
+  return iban.slice(pos.start, pos.start + pos.length);
 }
 
 export function isCountrySupported(country: string): boolean {
@@ -42,5 +72,5 @@ export function getAllowedLength(country: string): number {
 }
 
 export function hasBankData(country: string): boolean {
-  return country.toUpperCase() in BANK_CODE_LENGTH;
+  return resolvePosition(country) !== null;
 }

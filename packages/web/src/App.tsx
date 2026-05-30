@@ -6,6 +6,7 @@ import LoginPage from './pages/LoginPage';
 import DataUploadPage from './pages/admin/DataUploadPage';
 import StatusPage from './pages/admin/StatusPage';
 import AuditLogPage from './pages/admin/AuditLogPage';
+import ImportSchedulesPage from './pages/admin/ImportSchedulesPage';
 import { api } from './api/client';
 
 function Nav({ user, onLogout }: { user: string | null; onLogout: () => void }) {
@@ -19,6 +20,7 @@ function Nav({ user, onLogout }: { user: string | null; onLogout: () => void }) 
         {user ? (
           <>
             <Link to="/admin" className="text-slate-600 hover:text-slate-900">Upload</Link>
+            <Link to="/admin/imports" className="text-slate-600 hover:text-slate-900">Schedules</Link>
             <Link to="/admin/status" className="text-slate-600 hover:text-slate-900">Status</Link>
             <Link to="/admin/audit" className="text-slate-600 hover:text-slate-900">Audit</Link>
             <span className="text-slate-400">{user}</span>
@@ -59,6 +61,7 @@ export default function App() {
           <Route path="/calculate" element={<CalculatePage />} />
           <Route path="/login" element={<LoginPage onLogin={setUser} />} />
           <Route path="/admin" element={<RequireAuth><DataUploadPage /></RequireAuth>} />
+          <Route path="/admin/imports" element={<RequireAuth><ImportSchedulesPage /></RequireAuth>} />
           <Route path="/admin/status" element={<RequireAuth><StatusPage /></RequireAuth>} />
           <Route path="/admin/audit" element={<RequireAuth><AuditLogPage /></RequireAuth>} />
         </Routes>

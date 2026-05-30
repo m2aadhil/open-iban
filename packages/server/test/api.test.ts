@@ -334,3 +334,131 @@ describe('audit log retention', () => {
     expect(auditRepo.list({ action: 'test.old' }).total).toBe(0);
   });
 });
+
+describe('scheduled imports', () => {
+  let fixtureServer: import('node:http').Server;
+  let baseUrl = '';
+  let fixtureBody: string | null = 'code,name,bic\n30001,Banque de France,BDFEFRPPCCT\n';
+  let frIban = '';
+
+  function computeIban(cc: string, bban: string): string {
+    const rearranged = bban + cc + '00';
+    let numeric = '';
+    for (const ch of rearranged) {
+      const code = ch.charCodeAt(0);
+      if (code >= 48 && code <= 57) numeric += ch;
+      else if (code >= 65 && code <= 90) numeric += (code - 55).toString();
+    }
+    const check = 98n - (BigInt(numeric) % 97n);
+    return cc + check.toString().padStart(2, '0') + bban;
+  }
+
+  beforeAll(async () => {
+    const http = await import('node:http');
+    fixtureServer = http.createServer((req, res) => {
+      if (req.url === '/fr.csv' && fixtureBody !== null) {
+        res.writeHead(200, { 'content-type': 'text/csv' });
+        res.end(fixtureBody);
+      } else {
+        res.writeHead(404);
+        res.end('not found');
+      }
+    });
+    await new Promise<void>((r) => fixtureServer.listen(0, '127.0.0.1', r));
+    const addr = fixtureServer.address() as { port: number };
+    baseUrl = `http://127.0.0.1:${addr.port}`;
+    frIban = computeIban('FR', '30001' + '00000' + '00000000000' + '00');
+  });
+
+  afterAll(async () => {
+    await new Promise<void>((r) => fixtureServer.close(() => r()));
+  });
+
+  it('atomic failure preserves existing rows', async () => {
+    const { UploadService } = await import('../src/services/UploadService.js');
+    const { BankRepository } = await import('../src/db/repositories/BankRepository.js');
+    const { UploadRepository } = await import('../src/db/repositories/UploadRepository.js');
+    const banks = new BankRepository(db);
+    const uploads = new UploadRepository(db);
+    const svc = new UploadService(banks, uploads);
+
+    await svc.runIngest({
+      country: 'AT',
+      source: 'atomic-test',
+      filename: 'a.csv',
+      format: 'csv',
+      buffer: Buffer.from('Bankleitzahl;Bankenname;SWIFT-Code;PLZ;Ort\n99000;Test;TESTAT22XXX;1000;Wien\n'),
+      mapping: { bankCode: 'Bankleitzahl', name: 'Bankenname', bic: 'SWIFT-Code' },
+      actor: 'test',
+    });
+    const before = banks.find('AT', '99000');
+    expect(before?.bic).toBe('TESTAT22XXX');
+
+    await expect(
+      svc.runIngest({
+        country: 'AT',
+        source: 'atomic-test',
+        filename: 'broken.xlsx',
+        format: 'xlsx',
+        buffer: Buffer.from('this is not a valid xlsx file at all'),
+        mapping: { bankCode: 'Bankleitzahl' },
+        actor: 'test',
+      }),
+    ).rejects.toThrow();
+
+    const after = banks.find('AT', '99000');
+    expect(after?.bic).toBe('TESTAT22XXX');
+  });
+
+  it('scheduler run-once ingests from URL', async () => {
+    fixtureBody = 'code,name,bic\n30001,Banque de France,BDFEFRPPCCT\n';
+    const create = await app.inject({
+      method: 'POST', url: '/admin/imports',
+      headers: { cookie, 'content-type': 'application/json' },
+      payload: {
+        country: 'FR', source: 'fr-test', url: `${baseUrl}/fr.csv`, format: 'csv',
+        mapping: { bankCode: 'code', name: 'name', bic: 'bic' },
+        bankCodeStart: 4, bankCodeLength: 5, enabled: true,
+      },
+    });
+    expect(create.statusCode).toBe(200);
+    const id = create.json().id;
+
+    const run = await app.inject({
+      method: 'POST', url: `/admin/imports/${id}/run`, headers: { cookie },
+    });
+    expect(run.statusCode).toBe(200);
+    expect(run.json().rowCount).toBe(1);
+
+    
+    const validate = await app.inject({ method: 'GET', url: `/validate/${frIban}?getBIC=true` });
+    expect(validate.json().bankData?.bic).toBe('BDFEFRPPCCT');
+  });
+
+  it('universal validation works after scheduled import', async () => {
+    
+    const validate = await app.inject({ method: 'GET', url: `/validate/${frIban}?getBIC=true` });
+    expect(validate.json().bankData?.name).toBe('Banque de France');
+  });
+
+  it('scheduler failure preserves existing rows', async () => {
+    const list = await app.inject({ method: 'GET', url: '/admin/imports', headers: { cookie } });
+    const src = (list.json() as any[]).find((s) => s.source === 'fr-test');
+    expect(src).toBeTruthy();
+
+    fixtureBody = null;
+
+    const run = await app.inject({
+      method: 'POST', url: `/admin/imports/${src.id}/run`, headers: { cookie },
+    });
+    expect(run.statusCode).toBe(400);
+
+    
+    const validate = await app.inject({ method: 'GET', url: `/validate/${frIban}?getBIC=true` });
+    expect(validate.json().bankData?.bic).toBe('BDFEFRPPCCT');
+
+    const after = await app.inject({ method: 'GET', url: '/admin/imports', headers: { cookie } });
+    const updated = (after.json() as any[]).find((s) => s.id === src.id);
+    expect(updated.lastStatus).toBe('failed');
+  });
+});

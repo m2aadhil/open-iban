@@ -51,6 +51,30 @@ const MIGRATIONS: { id: number; sql: string }[] = [
       );
     `,
   },
+  {
+    id: 2,
+    sql: `
+      CREATE TABLE import_sources (
+        id                INTEGER PRIMARY KEY AUTOINCREMENT,
+        country           TEXT NOT NULL,
+        source            TEXT NOT NULL UNIQUE,
+        url               TEXT NOT NULL,
+        format            TEXT NOT NULL,
+        mapping           TEXT,
+        bank_code_start   INTEGER,
+        bank_code_length  INTEGER,
+        schedule          TEXT,
+        enabled           INTEGER NOT NULL DEFAULT 1,
+        last_run_at       INTEGER,
+        last_status       TEXT,
+        last_error        TEXT,
+        last_row_count    INTEGER,
+        created_at        INTEGER NOT NULL,
+        updated_at        INTEGER NOT NULL
+      );
+      CREATE INDEX idx_import_sources_enabled ON import_sources(enabled, schedule);
+    `,
+  },
 ];
 
 export function runMigrations(db: Database.Database) {

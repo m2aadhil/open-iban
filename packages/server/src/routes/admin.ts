@@ -1,11 +1,14 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import cron from 'node-cron';
 import { PARSERS } from '../parsers/ParserRegistry.js';
 import type { AuditRepository } from '../db/repositories/AuditRepository.js';
 import type { BankRepository } from '../db/repositories/BankRepository.js';
 import type { UploadRepository } from '../db/repositories/UploadRepository.js';
+import type { ImportSourceRepository } from '../db/repositories/ImportSourceRepository.js';
 import type { AuthService } from '../services/AuthService.js';
 import type { UploadService } from '../services/UploadService.js';
+import type { ImportScheduler } from '../services/ImportScheduler.js';
 import { config } from '../config.js';
 
 const LoginBody = z.object({ username: z.string().min(1), password: z.string().min(1) });
@@ -14,7 +17,31 @@ const AuditQuery = z.object({
   limit: z.coerce.number().min(1).max(500).default(50),
   offset: z.coerce.number().min(0).default(0),
 });
-const CustomCountryQuery = z.object({ country: z.string().length(2) });
+const CustomCountryQuery = z.object({
+  country: z.string().length(2),
+  bankCodeStart: z.coerce.number().int().min(0).optional(),
+  bankCodeLength: z.coerce.number().int().min(1).max(20).optional(),
+});
+
+const MappingSchema = z.object({
+  bankCode: z.string().min(1),
+  name: z.string().optional(),
+  bic: z.string().optional(),
+  zip: z.string().optional(),
+  city: z.string().optional(),
+});
+
+const ImportSourceBody = z.object({
+  country: z.string().length(2),
+  source: z.string().min(1),
+  url: z.string().url(),
+  format: z.enum(['csv', 'xlsx', 'fixed-width']),
+  mapping: MappingSchema.optional(),
+  bankCodeStart: z.number().int().min(0).optional(),
+  bankCodeLength: z.number().int().min(1).max(20).optional(),
+  schedule: z.string().min(1).optional(),
+  enabled: z.boolean().optional(),
+});
 const IngestBody = z.object({
   uploadId: z.string().min(1),
   mapping: z
@@ -43,6 +70,8 @@ export async function registerAdminRoutes(
     banks: BankRepository;
     uploadsRepo: UploadRepository;
     audit: AuditRepository;
+    importSources: ImportSourceRepository;
+    scheduler: ImportScheduler;
   },
 ) {
   app.post('/admin/login', {
@@ -151,8 +180,12 @@ export async function registerAdminRoutes(
     );
 
     scoped.post('/admin/data/preview/custom', async (req, reply) => {
-      const { country } = CustomCountryQuery.parse(req.query);
-      const cc = country.toUpperCase();
+      const q = CustomCountryQuery.parse(req.query);
+      const cc = q.country.toUpperCase();
+      if (q.bankCodeStart != null && q.bankCodeLength != null) {
+        const { setDynamicBankCodePosition } = await import('../iban/countries.js');
+        setDynamicBankCodePosition(cc, { start: q.bankCodeStart, length: q.bankCodeLength });
+      }
       const file = await req.file();
       if (!file) return reply.status(400).send({ error: 'No file uploaded' });
       const buf = await file.toBuffer();
@@ -218,6 +251,94 @@ export async function registerAdminRoutes(
 
     scoped.get('/admin/me', async (req, reply) => {
       return reply.send({ username: req.user.sub });
+    });
+
+    scoped.get('/admin/imports', async (_req, reply) => {
+      return reply.send(deps.importSources.list());
+    });
+
+    scoped.post('/admin/imports', async (req, reply) => {
+      const body = ImportSourceBody.parse(req.body);
+      if (body.schedule && !cron.validate(body.schedule)) {
+        return reply.status(400).send({ error: `Invalid cron expression: ${body.schedule}` });
+      }
+      try {
+        const created = deps.importSources.create(body);
+        deps.scheduler.applyPosition(created);
+        deps.scheduler.register(created);
+        deps.audit.write({
+          actor: req.user.sub,
+          action: 'import_source.create',
+          target: created.country,
+          ip: req.ip,
+          metadata: { id: created.id, source: created.source, url: created.url },
+        });
+        return reply.send(created);
+      } catch (err) {
+        const error = err instanceof Error ? err.message : String(err);
+        return reply.status(400).send({ error });
+      }
+    });
+
+    scoped.put<{ Params: { id: string } }>('/admin/imports/:id', async (req, reply) => {
+      const id = Number(req.params.id);
+      if (!Number.isFinite(id)) return reply.status(400).send({ error: 'Invalid id' });
+      const body = ImportSourceBody.parse(req.body);
+      if (body.schedule && !cron.validate(body.schedule)) {
+        return reply.status(400).send({ error: `Invalid cron expression: ${body.schedule}` });
+      }
+      const prev = deps.importSources.get(id);
+      if (!prev) return reply.status(404).send({ error: 'Not found' });
+      const updated = deps.importSources.update(id, body);
+      if (!updated) return reply.status(404).send({ error: 'Not found' });
+      deps.scheduler.clearPosition(prev);
+      deps.scheduler.applyPosition(updated);
+      deps.scheduler.reload(id);
+      deps.audit.write({
+        actor: req.user.sub,
+        action: 'import_source.update',
+        target: updated.country,
+        ip: req.ip,
+        metadata: { id, source: updated.source },
+      });
+      return reply.send(updated);
+    });
+
+    scoped.delete<{ Params: { id: string } }>('/admin/imports/:id', async (req, reply) => {
+      const id = Number(req.params.id);
+      if (!Number.isFinite(id)) return reply.status(400).send({ error: 'Invalid id' });
+      const prev = deps.importSources.get(id);
+      if (!prev) return reply.status(404).send({ error: 'Not found' });
+      deps.scheduler.unregister(id);
+      deps.scheduler.clearPosition(prev);
+      deps.importSources.delete(id);
+      deps.audit.write({
+        actor: req.user.sub,
+        action: 'import_source.delete',
+        target: prev.country,
+        ip: req.ip,
+        metadata: { id, source: prev.source },
+      });
+      return reply.send({ ok: true });
+    });
+
+    scoped.post<{ Params: { id: string } }>('/admin/imports/:id/run', async (req, reply) => {
+      const id = Number(req.params.id);
+      if (!Number.isFinite(id)) return reply.status(400).send({ error: 'Invalid id' });
+      try {
+        const result = await deps.scheduler.runOnce(id);
+        deps.audit.write({
+          actor: req.user.sub,
+          action: 'import_source.run',
+          target: result.country,
+          ip: req.ip,
+          metadata: { id, rowCount: result.rowCount },
+        });
+        return reply.send(result);
+      } catch (err) {
+        const error = err instanceof Error ? err.message : String(err);
+        return reply.status(400).send({ error });
+      }
     });
   });
 }

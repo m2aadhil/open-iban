@@ -52,4 +52,13 @@ export const api = {
   },
   ingestUpload: (uploadId: string, mapping?: Record<string, string | undefined>) =>
     request<any>('/admin/data/ingest', { method: 'POST', body: JSON.stringify({ uploadId, mapping }) }),
+  listImports: () => request<any[]>('/admin/imports'),
+  createImport: (body: any) =>
+    request<any>('/admin/imports', { method: 'POST', body: JSON.stringify(body) }),
+  updateImport: (id: number, body: any) =>
+    request<any>(`/admin/imports/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
+  deleteImport: (id: number) =>
+    request<{ ok: boolean }>(`/admin/imports/${id}`, { method: 'DELETE' }),
+  runImport: (id: number) =>
+    request<any>(`/admin/imports/${id}/run`, { method: 'POST' }),
 };
